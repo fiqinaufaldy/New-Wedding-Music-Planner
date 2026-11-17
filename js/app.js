@@ -9,7 +9,7 @@ const PLAYED_SONGS_KEY = "bandGuidePlayedSongs";
 
 // Google Sheets / Apps Script source for STAGING.
 // Leave empty to use the bundled songs.js fallback.
-const GOOGLE_SHEET_API_URL = "/api/songs";
+const GOOGLE_SHEET_API_URL = "https://script.google.com/macros/s/AKfycbyYydScIHau6murFh_CYSpn3qOqZg-AqiTktmy_wo1Ru9WvvGeW_kUIj6_JC6Mz80mw/exec";
 const GOOGLE_SHEET_FETCH_TIMEOUT = 10000;
 
 let role = null;
@@ -46,6 +46,51 @@ function normalizeSheetResponse(payload) {
   return rows.map(normalizeSheetSong).filter(s => s.title);
 }
 
+function normalizeSheetRequest(row, index) {
+  const pick = (...keys) => {
+    for (const key of keys) {
+      if (row && row[key] !== undefined && row[key] !== null) return String(row[key]).trim();
+    }
+    return "";
+  };
+  return {
+    id: pick("id", "ID") || `req-sheet-${String(index + 1).padStart(3, "0")}`,
+    title: pick("title", "Title", "Judul Lagu", "Judul"),
+    artist: pick("artist", "Artist", "Artis", "Band", "Band / Artis", "Bandnya"),
+    name: pick("name", "Name", "Requester", "Requestor", "Peminta"),
+    note: pick("note", "Note", "Notes", "Catatan"),
+    status: pick("status", "Status") || "Pending",
+    key: pick("key", "Key", "Chord", "Chord Dasar", "Nada Dasar Lagu (Chord Dasar)"),
+    reference: pick("reference", "Reference", "Reference Arrangement", "Reference Aransement"),
+    duration: pick("duration", "Duration", "Durasi", "Durasi Aksi")
+  };
+}
+
+function normalizeGuestRequestResponse(payload) {
+  const rows = Array.isArray(payload) ? payload : (payload?.data || payload?.requests || payload?.rows || []);
+  if (!Array.isArray(rows)) return [];
+  return rows.map(normalizeSheetRequest).filter(r => r.title);
+}
+
+async function fetchGuestRequests() {
+  if (!GUEST_REQUEST_API_URL) return null;
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), GOOGLE_SHEET_FETCH_TIMEOUT);
+  try {
+    const res = await fetch(GUEST_REQUEST_API_URL, { method: "GET", cache: "no-store", signal: controller.signal });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const payload = await res.json();
+    const remoteRequests = normalizeGuestRequestResponse(payload);
+    if (!remoteRequests.length) throw new Error("Guest Request sheet returned no rows.");
+    return remoteRequests;
+  } catch (err) {
+    console.warn("Guest Request Google Sheet unavailable. Using local request data instead.", err);
+    return null;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
 async function fetchGoogleSheetSongs() {
   if (!GOOGLE_SHEET_API_URL) return null;
   const controller = new AbortController();
@@ -66,15 +111,22 @@ async function fetchGoogleSheetSongs() {
 }
 
 function loadSongs() {
-  // Google Sheet is now the primary source. Keep only a previously cached
-  // copy as a temporary fallback; do not depend on DEFAULT_SONGS/songs.js.
+  // Force the supplied 46-song master data to replace any older browser cache.
+  // After this migration, normal edits are persisted as usual.
+  if (localStorage.getItem("weddingSongsVersion") !== SONG_DATA_VERSION) {
+    localStorage.setItem("weddingSongsVersion", SONG_DATA_VERSION);
+    localStorage.setItem("weddingSongs", JSON.stringify(DEFAULT_SONGS));
+    return structuredClone(DEFAULT_SONGS);
+  }
   const saved = localStorage.getItem("weddingSongs");
-  if (!saved) return [];
+  if (!saved) return structuredClone(DEFAULT_SONGS);
   try {
     const parsed = JSON.parse(saved);
-    return Array.isArray(parsed) ? parsed : [];
+    return Array.isArray(parsed) && parsed.length === DEFAULT_SONGS.length
+      ? parsed
+      : structuredClone(DEFAULT_SONGS);
   } catch {
-    return [];
+    return structuredClone(DEFAULT_SONGS);
   }
 }
 
@@ -148,18 +200,12 @@ function applyRole() {
   $$(".admin-only").forEach(el => el.classList.toggle("hidden", !isAdmin));
   const adminIcon = `<svg xmlns="http://www.w3.org/2000/svg" width="1em" height="1em" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M12 14v2a6 6 0 0 0-6 6H4a8 8 0 0 1 8-8m0-1c-3.315 0-6-2.685-6-6s2.685-6 6-6s6 2.685 6 6s-2.685 6-6 6m0-2c2.21 0 4-1.79 4-4s-1.79-4-4-4s-4 1.79-4 4s1.79 4 4 4m9 6h1v5h-8v-5h1v-1a3 3 0 1 1 6 0zm-2 0v-1a1 1 0 0 0-2 0v1z"/></svg>`;
   const memberIcon = `<svg xmlns="http://www.w3.org/2000/svg" width="1em" height="1em" viewBox="0 0 24 24" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-linecap="square" stroke-width="2" d="M16 20v-1a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v1M12.5 7a4 4 0 1 1-8 0a4 4 0 0 1 8 0Zm3 4a4 4 0 0 0 0-8M23 20v-1a4 4 0 0 0-4-4"/></svg>`;
-  const rolePill = $("#rolePill");
-  if (rolePill) {
-    rolePill.innerHTML = isAdmin
-      ? `${adminIcon}<span>Admin Access</span>`
-      : `${memberIcon}<span>Member Access</span>`;
-  }
-  const roleCard = $("#roleCard");
-  if (roleCard) {
-    roleCard.innerHTML = isAdmin
-      ? "<strong>Admin Access</strong><span>Full management access.</span>"
-      : "<strong>Guest Access</strong><span>Read-only access.</span>";
-  }
+  $("#rolePill").innerHTML = isAdmin
+    ? `${adminIcon}<span>Admin Access</span>`
+    : `${memberIcon}<span>Member Access</span>`;
+  $("#roleCard").innerHTML = isAdmin
+    ? "<strong>Admin Access</strong><span>Full management access.</span>"
+    : "<strong>Guest Access</strong><span>Read-only access.</span>";
 }
 function logout() {
   role = null;
@@ -488,9 +534,20 @@ function setTheme(theme) {
 
 document.addEventListener("DOMContentLoaded",async()=>{
   setupPins();
+  const [remoteSongs, remoteRequests] = await Promise.all([
+    fetchGoogleSheetSongs(),
+    fetchGuestRequests()
+  ]);
+  if (remoteSongs) {
+    songs = remoteSongs;
+    localStorage.setItem("weddingSongs", JSON.stringify(songs));
+    localStorage.setItem("weddingSongsVersion", SONG_DATA_VERSION + "-sheet");
+  }
+  if (remoteRequests) {
+    requests = remoteRequests;
+    localStorage.setItem("weddingRequests", JSON.stringify(requests));
+  }
 
-  // Bind login/UI handlers before waiting for the remote data.
-  // A slow or unavailable Google Sheet must never make the Login button dead.
   $("#loginBtn").addEventListener("click",login);
   $("#logoutBtn").addEventListener("click",logout);
   $("#songForm").addEventListener("submit",saveSong);
@@ -522,18 +579,6 @@ document.addEventListener("DOMContentLoaded",async()=>{
   document.addEventListener("click", e => { const btn=e.target.closest(".guest-reference-btn"); if(btn?.dataset.reference) openReference(btn.dataset.reference); });
   $("#searchInput").addEventListener("input",renderSongs);
   ["categoryFilter","performerFilter","statusFilter"].forEach(id=>$("#"+id).addEventListener("change",renderSongs));
-
-  // Fetch Google Sheet after the UI is wired so network errors cannot block Login.
-  const remoteSongs = await fetchGoogleSheetSongs();
-  if (remoteSongs) {
-    songs = remoteSongs;
-    localStorage.setItem("weddingSongs", JSON.stringify(songs));
-    localStorage.setItem("weddingSongsVersion", SONG_DATA_VERSION + "-sheet");
-    renderSongs();
-    updateDashboard();
-    if (typeof renderBandGuide === "function") renderBandGuide();
-  }
-
   const scrollHorizontalTable = (direction) => {
     const target = document.querySelector("#songsPage:not(.hidden) .table-scroll, #requestsPage:not(.hidden) .guest-table-scroll");
     if (!target) return;
