@@ -148,12 +148,18 @@ function applyRole() {
   $$(".admin-only").forEach(el => el.classList.toggle("hidden", !isAdmin));
   const adminIcon = `<svg xmlns="http://www.w3.org/2000/svg" width="1em" height="1em" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M12 14v2a6 6 0 0 0-6 6H4a8 8 0 0 1 8-8m0-1c-3.315 0-6-2.685-6-6s2.685-6 6-6s6 2.685 6 6s-2.685 6-6 6m0-2c2.21 0 4-1.79 4-4s-1.79-4-4-4s-4 1.79-4 4s1.79 4 4 4m9 6h1v5h-8v-5h1v-1a3 3 0 1 1 6 0zm-2 0v-1a1 1 0 0 0-2 0v1z"/></svg>`;
   const memberIcon = `<svg xmlns="http://www.w3.org/2000/svg" width="1em" height="1em" viewBox="0 0 24 24" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-linecap="square" stroke-width="2" d="M16 20v-1a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v1M12.5 7a4 4 0 1 1-8 0a4 4 0 0 1 8 0Zm3 4a4 4 0 0 0 0-8M23 20v-1a4 4 0 0 0-4-4"/></svg>`;
-  $("#rolePill").innerHTML = isAdmin
-    ? `${adminIcon}<span>Admin Access</span>`
-    : `${memberIcon}<span>Member Access</span>`;
-  $("#roleCard").innerHTML = isAdmin
-    ? "<strong>Admin Access</strong><span>Full management access.</span>"
-    : "<strong>Guest Access</strong><span>Read-only access.</span>";
+  const rolePill = $("#rolePill");
+  if (rolePill) {
+    rolePill.innerHTML = isAdmin
+      ? `${adminIcon}<span>Admin Access</span>`
+      : `${memberIcon}<span>Member Access</span>`;
+  }
+  const roleCard = $("#roleCard");
+  if (roleCard) {
+    roleCard.innerHTML = isAdmin
+      ? "<strong>Admin Access</strong><span>Full management access.</span>"
+      : "<strong>Guest Access</strong><span>Read-only access.</span>";
+  }
 }
 function logout() {
   role = null;
