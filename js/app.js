@@ -59,7 +59,7 @@ async function fetchGoogleSheetSongs() {
     if (!remoteSongs.length) throw new Error("Google Sheet returned no song rows.");
     return remoteSongs;
   } catch (err) {
-    console.warn("Google Sheet unavailable. Using bundled/local song data instead.", err);
+    console.warn("Google Sheet unavailable. Using cached song data instead.", err);
     return null;
   } finally {
     clearTimeout(timeout);
