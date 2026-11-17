@@ -59,7 +59,7 @@ async function fetchGoogleSheetSongs() {
     if (!remoteSongs.length) throw new Error("Google Sheet returned no song rows.");
     return remoteSongs;
   } catch (err) {
-    console.warn("Google Sheet unavailable. Using cached song data instead.", err);
+    console.warn("Google Sheet unavailable. Using bundled/local song data instead.", err);
     return null;
   } finally {
     clearTimeout(timeout);
@@ -566,7 +566,17 @@ document.addEventListener("DOMContentLoaded",async()=>{
   $("#songForm")?.addEventListener("submit",saveSong);
   $("#requestForm")?.addEventListener("submit",async e=>{
     e.preventDefault();
-    const payload={name:$("#rName")?.value.trim(),title:$("#rTitle")?.value.trim(),artist:$("#rArtist")?.value.trim(),performer:$("#rPerformer")?.value.trim(),note:$("#rNote")?.value.trim(),status:"Pending"};
+    const payload={
+      name:$("#rName")?.value.trim(),
+      title:$("#rTitle")?.value.trim(),
+      artist:$("#rArtist")?.value.trim(),
+      performer:$("#rPerformer")?.value.trim(),
+      key:$("#rKey")?.value.trim(),
+      duration:$("#rDuration")?.value.trim(),
+      reference:$("#rReference")?.value.trim(),
+      note:$("#rNote")?.value.trim(),
+      status:"Pending"
+    };
     try {
       await guestRequestAction("addGuestRequest", payload);
       closeModal("requestModal"); e.target.reset(); await refreshGuestRequests();
