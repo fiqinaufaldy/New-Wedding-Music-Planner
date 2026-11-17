@@ -1,21 +1,32 @@
-const GOOGLE_SHEET_WEB_APP_URL = 'https://script.google.com/macros/s/AKfycbyYydScIHau6murFh_CYSpn3qOqZg-AqiTktmy_wo1Ru9WvvGeW_kUIj6_JC6Mz80mw/exec';
+const GOOGLE_SHEET_API_URL = "https://script.google.com/macros/s/AKfycbyYydScIHau6murFh_CYSpn3qOqZg-AqiTktmy_wo1Ru9WvvGeW_kUIj6_JC6Mz80mw/exec";
 
 export default async function handler(req, res) {
   try {
-    const response = await fetch(`${GOOGLE_SHEET_WEB_APP_URL}?sheet=Guest%20Request`, {
-      method: 'GET',
-      headers: { 'Accept': 'application/json' },
-      cache: 'no-store'
-    });
-
-    if (!response.ok) {
-      return res.status(response.status).json({ error: `Google Apps Script returned HTTP ${response.status}` });
+    if (req.method === "GET") {
+      const url = `${GOOGLE_SHEET_API_URL}?sheet=guest-requests`;
+      const response = await fetch(url, { method: "GET", cache: "no-store", redirect: "follow" });
+      const data = await response.text();
+      res.setHeader("Cache-Control", "no-store, max-age=0");
+      res.setHeader("Content-Type", "application/json; charset=utf-8");
+      return res.status(response.status).send(data);
     }
 
-    const data = await response.json();
-    return res.status(200).json(data);
+    if (req.method === "POST") {
+      const response = await fetch(GOOGLE_SHEET_API_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(req.body || {})
+      });
+      const data = await response.text();
+      res.setHeader("Cache-Control", "no-store, max-age=0");
+      res.setHeader("Content-Type", "application/json; charset=utf-8");
+      return res.status(response.status).send(data);
+    }
+
+    res.setHeader("Allow", "GET, POST");
+    return res.status(405).json({ error: "Method Not Allowed" });
   } catch (error) {
-    console.error('Guest Request proxy error:', error);
-    return res.status(502).json({ error: 'Unable to load Guest Request data.' });
+    console.error("Guest Request proxy error:", error);
+    return res.status(502).json({ error: "Unable to reach Google Sheet", detail: String(error?.message || error) });
   }
 }

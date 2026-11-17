@@ -11,10 +11,11 @@ const PLAYED_SONGS_KEY = "bandGuidePlayedSongs";
 // Leave empty to use the bundled songs.js fallback.
 const GOOGLE_SHEET_API_URL = "/api/songs";
 const GOOGLE_SHEET_FETCH_TIMEOUT = 10000;
+const GUEST_REQUESTS_API_URL = "/api/guest-requests";
 
 let role = null;
 let songs = loadSongs();
-let requests = load("weddingRequests", []);
+let requests = [];
 let playedSongs = loadPlayedSongs();
 
 function normalizeSheetSong(row, index) {
@@ -65,6 +66,68 @@ async function fetchGoogleSheetSongs() {
   }
 }
 
+function normalizeGuestRequest(row, index) {
+  const pick = (...keys) => {
+    for (const key of keys) {
+      if (row && row[key] !== undefined && row[key] !== null) return String(row[key]).trim();
+    }
+    return "";
+  };
+  return {
+    id: pick("id", "ID") || `req-${String(index + 1).padStart(3, "0")}`,
+    title: pick("title", "Title", "Judul Lagu"),
+    artist: pick("artist", "Artist", "Artis", "Band / Artis", "Artis / Band"),
+    name: pick("name", "Name", "Requester", "Requestor"),
+    note: pick("note", "Note", "Notes"),
+    status: pick("status", "Status") || "Pending",
+    key: pick("key", "Key", "Chord", "Chord Dasar"),
+    reference: pick("reference", "Reference", "Reference Arrangement", "Reference Aransement"),
+    duration: pick("duration", "Duration", "Durasi", "Durasi Aksi"),
+    performer: pick("performer", "Performer")
+  };
+}
+
+async function fetchGuestRequests() {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), GOOGLE_SHEET_FETCH_TIMEOUT);
+  try {
+    const res = await fetch(GUEST_REQUESTS_API_URL, { method: "GET", cache: "no-store", signal: controller.signal });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const payload = await res.json();
+    const rows = Array.isArray(payload) ? payload : (payload?.data || payload?.requests || payload?.rows || []);
+    if (!Array.isArray(rows)) throw new Error("Guest Request response is not an array.");
+    return rows.map(normalizeGuestRequest).filter(r => r.title);
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+async function guestRequestAction(action, payload) {
+  const res = await fetch(GUEST_REQUESTS_API_URL, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ action, ...payload })
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok || data?.success === false) throw new Error(data?.error || `HTTP ${res.status}`);
+  return data;
+}
+
+async function refreshGuestRequests() {
+  try {
+    requests = await fetchGuestRequests();
+    renderRequests();
+    updateDashboard();
+    return true;
+  } catch (err) {
+    console.error("Guest Request Google Sheet unavailable:", err);
+    requests = [];
+    renderRequests();
+    updateDashboard();
+    return false;
+  }
+}
+
 function loadSongs() {
   // Google Sheet is now the primary source. Keep only a previously cached
   // copy as a temporary fallback; do not depend on DEFAULT_SONGS/songs.js.
@@ -85,7 +148,6 @@ function load(key, fallback) {
 }
 function save() {
   localStorage.setItem("weddingSongs", JSON.stringify(songs));
-  localStorage.setItem("weddingRequests", JSON.stringify(requests));
   localStorage.setItem(PLAYED_SONGS_KEY, JSON.stringify(playedSongs));
 }
 function loadPlayedSongs() {
@@ -322,13 +384,25 @@ function renderRequests() {
     </tr>`;
   }).join("") : `<tr><td colspan="9" class="guest-empty">Tidak ada request yang cocok.</td></tr>`;
 }
-function approveRequest(id, status) {
-  const r = requests.find(x=>x.id===id); if(!r) return; r.status=status; save(); renderRequests();
-}
-function promoteRequest(id) {
+async function approveRequest(id, status) {
   const r = requests.find(x=>x.id===id); if(!r) return;
-  songs.push({id:`song-${Date.now()}`,title:r.title,artist:r.artist,duration:"",personalNotes:r.note,category:"Reception",performer:r.performer||r.name,status:"Guest Request",key:"",reference:"",notes:"Added from guest request"});
-  save(); renderRequests(); renderSongs(); updateDashboard();
+  try {
+    await guestRequestAction("updateGuestRequest", { id, status });
+    await refreshGuestRequests();
+  } catch (err) {
+    alert(`Gagal mengubah status request: ${err.message}`);
+  }
+}
+async function promoteRequest(id) {
+  const r = requests.find(x=>x.id===id); if(!r) return;
+  try {
+    await guestRequestAction("addToMainPlaylist", { request: r });
+    await refreshGuestRequests();
+    const remoteSongs = await fetchGoogleSheetSongs();
+    if (remoteSongs) { songs = remoteSongs; localStorage.setItem("weddingSongs", JSON.stringify(songs)); renderSongs(); updateDashboard(); if (typeof renderBandGuide === "function") renderBandGuide(); }
+  } catch (err) {
+    alert(`Gagal menambahkan ke Main Playlist: ${err.message}`);
+  }
 }
 let bandGuideOpen = JSON.parse(localStorage.getItem("bandGuideOpen") || "{}");
 let bandGuideTab = localStorage.getItem("bandGuideTab") || "list";
@@ -490,10 +564,15 @@ document.addEventListener("DOMContentLoaded",async()=>{
   $("#loginBtn")?.addEventListener("click", login);
   $("#logoutBtn")?.addEventListener("click",logout);
   $("#songForm")?.addEventListener("submit",saveSong);
-  $("#requestForm").addEventListener("submit",e=>{
+  $("#requestForm")?.addEventListener("submit",async e=>{
     e.preventDefault();
-    requests.push({id:`req-${Date.now()}`,name:$("#rName").value.trim(),title:$("#rTitle").value.trim(),artist:$("#rArtist").value.trim(),performer:$("#rPerformer").value.trim(),note:$("#rNote").value.trim(),status:"Pending"});
-    save(); closeModal("requestModal"); e.target.reset(); renderRequests();
+    const payload={name:$("#rName")?.value.trim(),title:$("#rTitle")?.value.trim(),artist:$("#rArtist")?.value.trim(),performer:$("#rPerformer")?.value.trim(),note:$("#rNote")?.value.trim(),status:"Pending"};
+    try {
+      await guestRequestAction("addGuestRequest", payload);
+      closeModal("requestModal"); e.target.reset(); await refreshGuestRequests();
+    } catch (err) {
+      alert(`Gagal menyimpan request ke Google Sheet: ${err.message}`);
+    }
   });
   $("#addSongBtn")?.addEventListener("click",()=>openSong());
   $("#printBandGuideBtn")?.addEventListener("click",()=>window.print());
@@ -529,6 +608,9 @@ document.addEventListener("DOMContentLoaded",async()=>{
     updateDashboard();
     if (typeof renderBandGuide === "function") renderBandGuide();
   }
+
+  // Guest Request is Google Sheet-only. Never restore requests from localStorage.
+  await refreshGuestRequests();
 
   const scrollHorizontalTable = (direction) => {
     const target = document.querySelector("#songsPage:not(.hidden) .table-scroll, #requestsPage:not(.hidden) .guest-table-scroll");
