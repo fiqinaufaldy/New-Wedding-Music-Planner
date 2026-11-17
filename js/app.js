@@ -9,7 +9,7 @@ const PLAYED_SONGS_KEY = "bandGuidePlayedSongs";
 
 // Google Sheets / Apps Script source for STAGING.
 // Leave empty to use the bundled songs.js fallback.
-const GOOGLE_SHEET_API_URL = "https://script.google.com/macros/s/AKfycbzt8aQtJucfoaXo6bn1RT2c76bII6TOnO9bYlXxuJaCsTII0WRINpVcE4NFr77G7NaS/exec";
+const GOOGLE_SHEET_API_URL = "/api/songs";
 const GOOGLE_SHEET_FETCH_TIMEOUT = 10000;
 
 let role = null;
